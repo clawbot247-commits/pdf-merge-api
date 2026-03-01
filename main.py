@@ -12,7 +12,7 @@ CORS(app)
 
 @app.route('/')
 def health():
-    return {'status': 'ok', 'service': 'PDF Merge API (pdftoppm + img2pdf)'}
+    return {'status': 'ok', 'service': 'PDF Merge API (pdftoppm + img2pdf + gs compress)'}
 
 @app.route('/merge', methods=['POST'])
 def merge():
@@ -29,9 +29,9 @@ def merge():
 
             img_prefix = os.path.join(tmpdir, f'pages_{i:03d}')
 
-            # Rasterize PDF pages to PNG images (150 DPI — good quality, reasonable size)
+            # Rasterize PDF pages to grayscale PNG (120 DPI — forms are B&W, gray saves ~3x vs color)
             result = subprocess.run(
-                ['pdftoppm', '-r', '150', '-png', pdf_path, img_prefix],
+                ['pdftoppm', '-r', '120', '-gray', '-png', pdf_path, img_prefix],
                 capture_output=True, text=True, timeout=60
             )
 
@@ -53,13 +53,26 @@ def merge():
         output_path = os.path.join(tmpdir, 'merged.pdf')
 
         # Pack all images into a single PDF
+        raw_path = os.path.join(tmpdir, 'raw.pdf')
         result = subprocess.run(
-            ['img2pdf'] + all_images + ['-o', output_path],
+            ['img2pdf'] + all_images + ['-o', raw_path],
             capture_output=True, text=True, timeout=120
         )
 
         if result.returncode != 0:
             return {'error': f'img2pdf failed: {result.stderr}'}, 500
+
+        # Compress with Ghostscript (/ebook = ~150 DPI JPEG, readable + compact)
+        result = subprocess.run(
+            ['gs', '-dBATCH', '-dNOPAUSE', '-dQUIET',
+             '-sDEVICE=pdfwrite', '-dPDFSETTINGS=/ebook',
+             f'-sOutputFile={output_path}', raw_path],
+            capture_output=True, text=True, timeout=120
+        )
+
+        if result.returncode != 0:
+            # GS failed — fall back to uncompressed
+            output_path = raw_path
 
         with open(output_path, 'rb') as out:
             pdf_bytes = out.read()
