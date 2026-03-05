@@ -3,3 +3,5 @@ flask-cors
 pypdf
 img2pdf
 gunicorn
+pymupdf
+pikepdf

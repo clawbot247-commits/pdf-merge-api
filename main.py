@@ -84,5 +84,37 @@ def merge():
         download_name='merged.pdf'
     )
 
+@app.route('/fill-mnr', methods=['POST'])
+def fill_mnr_endpoint():
+    """
+    Accepts JSON body with MNR field data + _radio_select.
+    Returns a filled, flattened (but editable) MNR PDF.
+    """
+    from fill_mnr import fill_mnr
+
+    data = request.get_json()
+    if not data:
+        return {'error': 'JSON body required'}, 400
+
+    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tf:
+        output_path = tf.name
+
+    try:
+        fill_mnr(data, output_path)
+        with open(output_path, 'rb') as f:
+            pdf_bytes = f.read()
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name='MNR_filled.pdf'
+        )
+    except Exception as e:
+        return {'error': str(e)}, 500
+    finally:
+        if os.path.exists(output_path):
+            os.unlink(output_path)
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000)
