@@ -151,7 +151,8 @@ Return ONLY valid JSON. No explanation, no markdown."""
 
 @app.route('/mnr-claw')
 def mnr_claw_ui():
-    return render_template('mnr_claw.html')
+    has_key = bool(os.environ.get('ANTHROPIC_API_KEY', '').strip())
+    return render_template('mnr_claw.html', server_has_key=has_key)
 
 @app.route('/mnr-claw/extract', methods=['POST'])
 def mnr_extract():
