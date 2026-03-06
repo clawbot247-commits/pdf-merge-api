@@ -233,6 +233,12 @@ def clear_field_appearances(input_path: str, output_path: str):
                 if "/AP" in annot:
                     del annot["/AP"]
 
+    # Critical: tell all PDF viewers to use our set appearances,
+    # not regenerate them from scratch (which would show old template values)
+    acroform = pdf.Root.get("/AcroForm")
+    if acroform:
+        acroform["/NeedAppearances"] = pikepdf.Boolean(False)
+
     pdf.save(output_path)
 
 
