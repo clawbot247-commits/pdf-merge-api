@@ -5,3 +5,4 @@ img2pdf
 gunicorn
 pymupdf
 pikepdf
+requests

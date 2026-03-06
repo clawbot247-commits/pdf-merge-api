@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>MNR Claw — ASH Form Filler</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .step { display:none; }
+    .step.active { display:block; }
+    .drop-zone { border:2px dashed #94a3b8; transition:border-color .2s,background .2s; }
+    .drop-zone.drag-over { border-color:#3b82f6; background:#eff6ff; }
+    .field-group { border-left:3px solid #e2e8f0; }
+    .field-group.filled { border-left-color:#22c55e; }
+    input[type=text]:focus,textarea:focus,select:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 2px #bfdbfe; }
+    .spinner { animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .toast { animation:fadein .3s,fadeout .3s 2.7s; }
+    @keyframes fadein { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes fadeout { from{opacity:1} to{opacity:0} }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans">
+
+<!-- Header -->
+<header class="bg-white border-b border-slate-200 px-6 py-4 flex items-center gap-3">
+  <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
+    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+  </div>
+  <div>
+    <h1 class="text-lg font-bold text-slate-800">MNR Claw</h1>
+    <p class="text-xs text-slate-500">ASH Medical Necessity Review — AI Form Filler</p>
+  </div>
+  <!-- Progress -->
+  <div class="ml-auto flex items-center gap-2 text-sm">
+    <span id="prog1" class="px-3 py-1 rounded-full bg-blue-600 text-white font-medium">1 Upload</span>
+    <span class="text-slate-300">→</span>
+    <span id="prog2" class="px-3 py-1 rounded-full bg-slate-200 text-slate-500 font-medium">2 Review</span>
+    <span class="text-slate-300">→</span>
+    <span id="prog3" class="px-3 py-1 rounded-full bg-slate-200 text-slate-500 font-medium">3 Download</span>
+  </div>
+</header>
+
+<!-- Toast -->
+<div id="toast-container" class="fixed bottom-6 right-6 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+<main class="max-w-4xl mx-auto px-4 py-8">
+
+  <!-- STEP 1: Upload -->
+  <div id="step1" class="step active">
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8">
+      <h2 class="text-xl font-bold text-slate-800 mb-1">Upload Patient Intake Form</h2>
+      <p class="text-slate-500 text-sm mb-6">Photo or scanned PDF of the patient's handwritten intake form. Claude Vision will extract all fields.</p>
+
+      <div id="drop-zone" class="drop-zone rounded-xl p-12 text-center cursor-pointer hover:bg-slate-50">
+        <input type="file" id="file-input" accept="image/*,.pdf" class="hidden"/>
+        <div id="upload-idle">
+          <svg class="w-12 h-12 text-slate-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <p class="text-slate-600 font-medium mb-1">Drop image or PDF here</p>
+          <p class="text-slate-400 text-sm">or click to browse — JPG, PNG, PDF supported</p>
+        </div>
+        <div id="upload-preview" class="hidden">
+          <img id="preview-img" class="max-h-48 mx-auto rounded-lg shadow mb-3 hidden"/>
+          <p id="preview-filename" class="text-slate-700 font-medium"></p>
+          <p id="preview-size" class="text-slate-400 text-sm"></p>
+          <button onclick="clearFile()" class="mt-3 text-sm text-red-500 hover:text-red-700">✕ Remove</button>
+        </div>
+      </div>
+
+      <!-- API Key -->
+      <div class="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+        <label class="block text-sm font-medium text-amber-800 mb-1">Anthropic API Key</label>
+        <input type="password" id="api-key" placeholder="sk-ant-..." class="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm bg-white focus:border-blue-400" />
+        <p class="text-xs text-amber-600 mt-1">Your key is used server-side only and never stored. Get one at <a href="https://console.anthropic.com" target="_blank" class="underline">console.anthropic.com</a></p>
+      </div>
+
+      <button id="extract-btn" onclick="extractFields()" class="mt-6 w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347a3.26 3.26 0 01-4.606 0l-.347-.347z"/></svg>
+        Extract with Claude Vision
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 2: Review & Edit -->
+  <div id="step2" class="step">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h2 class="text-xl font-bold text-slate-800">Review Extracted Fields</h2>
+        <p class="text-slate-500 text-sm">Edit any fields before generating the PDF</p>
+      </div>
+      <button onclick="goBack()" class="text-sm text-slate-500 hover:text-slate-700 flex items-center gap-1">← Back</button>
+    </div>
+
+    <form id="fields-form" class="space-y-4">
+
+      <!-- Patient Info -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-3 bg-blue-50 border-b border-blue-100 flex items-center gap-2">
+          <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+          <span class="font-semibold text-blue-800 text-sm">Patient Information</span>
+        </div>
+        <div class="p-5 grid grid-cols-2 gap-4">
+          <div class="col-span-2"><label class="field-label">Patient Name</label><input type="text" name="patientName" class="field-input"/></div>
+          <div><label class="field-label">Date of Birth</label><input type="text" name="dateOfBirth" placeholder="mm/dd/yyyy" class="field-input"/></div>
+          <div><label class="field-label">Gender</label>
+            <select name="gender" class="field-input">
+              <option value="">—</option>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+            </select>
+          </div>
+          <div><label class="field-label">Phone Number</label><input type="text" name="phoneNumber" class="field-input"/></div>
+          <div><label class="field-label">Patient ID / Subscriber ID</label><input type="text" name="subscriberId" class="field-input"/></div>
+          <div class="col-span-2"><label class="field-label">Address</label><input type="text" name="address" class="field-input"/></div>
+          <div class="col-span-2"><label class="field-label">City, State, Zip</label><input type="text" name="patientCityStateZip" class="field-input"/></div>
+        </div>
+      </div>
+
+      <!-- Insurance -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-3 bg-green-50 border-b border-green-100 flex items-center gap-2">
+          <svg class="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+          <span class="font-semibold text-green-800 text-sm">Insurance</span>
+        </div>
+        <div class="p-5 grid grid-cols-2 gap-4">
+          <div class="col-span-2"><label class="field-label">Health Plan / Insurance</label><input type="text" name="insurance" class="field-input"/></div>
+          <div><label class="field-label">Group Number</label><input type="text" name="groupNumber" class="field-input"/></div>
+          <div><label class="field-label">Employer</label><input type="text" name="employer" class="field-input"/></div>
+          <div class="col-span-2"><label class="field-label">Primary Care Physician</label><input type="text" name="primaryCarePhysician" class="field-input"/></div>
+        </div>
+      </div>
+
+      <!-- Condition -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-3 bg-red-50 border-b border-red-100 flex items-center gap-2">
+          <svg class="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z"/></svg>
+          <span class="font-semibold text-red-800 text-sm">Conditions & ICD Codes</span>
+        </div>
+        <div class="p-5 grid grid-cols-4 gap-3">
+          <div><label class="field-label">ICD 1</label><input type="text" name="icd1" class="field-input font-mono"/></div>
+          <div class="col-span-3"><label class="field-label">Condition 1</label><input type="text" name="condition1" class="field-input"/></div>
+          <div><label class="field-label">ICD 2</label><input type="text" name="icd2" class="field-input font-mono"/></div>
+          <div class="col-span-3"><label class="field-label">Condition 2</label><input type="text" name="condition2" class="field-input"/></div>
+          <div><label class="field-label">ICD 3</label><input type="text" name="icd3" class="field-input font-mono"/></div>
+          <div class="col-span-3"><label class="field-label">Condition 3</label><input type="text" name="condition3" class="field-input"/></div>
+          <div><label class="field-label">ICD 4</label><input type="text" name="icd4" class="field-input font-mono"/></div>
+          <div class="col-span-3"><label class="field-label">Condition 4</label><input type="text" name="condition4" class="field-input"/></div>
+        </div>
+      </div>
+
+      <!-- Complaints & Pain -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-3 bg-orange-50 border-b border-orange-100">
+          <span class="font-semibold text-orange-800 text-sm">Chief Complaints & Pain</span>
+        </div>
+        <div class="p-5 grid grid-cols-2 gap-4">
+          <div class="col-span-2"><label class="field-label">Chief Complaint(s)</label><textarea name="currentHealthProblems" rows="2" class="field-input resize-none"></textarea></div>
+          <div><label class="field-label">When Did It Begin</label><input type="text" name="whenBegan" class="field-input"/></div>
+          <div><label class="field-label">How Did It Happen</label><input type="text" name="howHappened" class="field-input"/></div>
+          <div><label class="field-label">Symptom Frequency</label>
+            <select name="symptomFrequency" class="field-input">
+              <option value="">—</option>
+              <option>1-10%</option><option>11-20%</option><option>21-30%</option><option>31-40%</option>
+              <option>41-50%</option><option>51-60%</option><option>61-70%</option><option>71-80%</option>
+              <option>81-90%</option><option>91-100%</option>
+            </select>
+          </div>
+          <div><label class="field-label">Pain Location</label><input type="text" name="painLocation" class="field-input"/></div>
+          <div><label class="field-label">Average Pain (0-10)</label><input type="number" name="averagePainLevel" min="0" max="10" class="field-input"/></div>
+          <div><label class="field-label">Worst Pain (0-10)</label><input type="number" name="worstPainLevel" min="0" max="10" class="field-input"/></div>
+          <div><label class="field-label">Current Pain (0-10)</label><input type="number" name="currentPainLevel" min="0" max="10" class="field-input"/></div>
+          <div><label class="field-label">Daily Interference Pain (0-10)</label><input type="number" name="dailyInterferencePainLevel" min="0" max="10" class="field-input"/></div>
+          <div class="col-span-2"><label class="field-label">How Long Does Relief Last?</label><input type="text" name="reliefDuration" class="field-input"/></div>
+        </div>
+      </div>
+
+      <!-- Functional Outcomes -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-3 bg-purple-50 border-b border-purple-100">
+          <span class="font-semibold text-purple-800 text-sm">Functional Outcomes</span>
+        </div>
+        <div class="p-5 space-y-3">
+          <div class="grid grid-cols-3 gap-3 text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">
+            <span>Activity</span><span>Measurements</span><span>How Has It Changed?</span>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <input type="text" name="activity1" placeholder="e.g. Walking" class="field-input"/>
+            <input type="text" name="measurements1" placeholder="e.g. 1 block" class="field-input"/>
+            <input type="text" name="changes1" placeholder="e.g. Improved" class="field-input"/>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <input type="text" name="activity2" placeholder="e.g. Sleep" class="field-input"/>
+            <input type="text" name="measurements2" class="field-input"/>
+            <input type="text" name="changes2" class="field-input"/>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <input type="text" name="activity3" placeholder="e.g. Work" class="field-input"/>
+            <input type="text" name="measurements3" class="field-input"/>
+            <input type="text" name="changes3" class="field-input"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Clinical -->
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-3 bg-teal-50 border-b border-teal-100">
+          <span class="font-semibold text-teal-800 text-sm">Clinical Assessment</span>
+        </div>
+        <div class="p-5 grid grid-cols-2 gap-4">
+          <div><label class="field-label">Being Cared for by Physician?</label>
+            <select name="underPhysicianCare" class="field-input">
+              <option value="No">No</option>
+              <option value="Yes">Yes</option>
+            </select>
+          </div>
+          <div><label class="field-label">For What Condition?</label><input type="text" name="physicianCondition" class="field-input"/></div>
+          <div><label class="field-label">Is Patient Pregnant?</label>
+            <select name="pregnant" class="field-input">
+              <option value="No">No</option>
+              <option value="Yes">Yes</option>
+            </select>
+          </div>
+          <div><label class="field-label">If Yes, # of Weeks</label><input type="text" name="pregnantWeeks" class="field-input"/></div>
+          <div><label class="field-label">Tobacco Use</label>
+            <select name="tobaccoUse" class="field-input">
+              <option value="No">No</option>
+              <option value="Yes">Yes</option>
+            </select>
+          </div>
+          <div><label class="field-label">Acupuncture Progress</label>
+            <select name="acupunctureProgress" class="field-input">
+              <option value="">—</option>
+              <option>Good</option><option>Fair</option><option>Poor</option><option>N/A</option>
+            </select>
+          </div>
+          <div><label class="field-label">Height</label><input type="text" name="height" class="field-input"/></div>
+          <div><label class="field-label">Weight</label><input type="text" name="weight" class="field-input"/></div>
+          <div><label class="field-label">Blood Pressure</label><input type="text" name="bloodPressure" placeholder="120/80" class="field-input"/></div>
+          <div><label class="field-label">Medications</label><input type="text" name="medications" class="field-input"/></div>
+          <div><label class="field-label">Tongue Signs</label><input type="text" name="tongueSign" class="field-input"/></div>
+          <div class="grid grid-cols-2 gap-2">
+            <div><label class="field-label">Pulse Rt</label><input type="text" name="pulseSignRight" class="field-input"/></div>
+            <div><label class="field-label">Pulse Lt</label><input type="text" name="pulseSignLeft" class="field-input"/></div>
+          </div>
+          <div class="col-span-2"><label class="field-label">Other Comments</label><textarea name="otherComments" rows="2" class="field-input resize-none"></textarea></div>
+        </div>
+      </div>
+
+    </form>
+
+    <button onclick="generatePDF()" id="generate-btn" class="mt-6 w-full py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition flex items-center justify-center gap-2">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"/></svg>
+      Generate Filled MNR PDF
+    </button>
+  </div>
+
+  <!-- STEP 3: Download -->
+  <div id="step3" class="step">
+    <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 text-center">
+      <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+        <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      </div>
+      <h2 class="text-2xl font-bold text-slate-800 mb-2">MNR Form Ready!</h2>
+      <p class="text-slate-500 mb-6">Your filled ASH MNR PDF has been generated.</p>
+      <a id="download-link" href="#" download="MNR_filled.pdf"
+         class="inline-flex items-center gap-2 px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        Download PDF
+      </a>
+      <div class="mt-4">
+        <button onclick="startOver()" class="text-sm text-slate-500 hover:text-slate-700">← Process Another Form</button>
+      </div>
+    </div>
+
+    <!-- PDF Preview -->
+    <div class="mt-4 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-3 border-b border-slate-100 text-sm font-medium text-slate-600">Preview</div>
+      <iframe id="pdf-preview" class="w-full" style="height:70vh;" frameborder="0"></iframe>
+    </div>
+  </div>
+
+</main>
+
+<style>
+  .field-label { display:block; font-size:.75rem; font-weight:500; color:#64748b; margin-bottom:.25rem; text-transform:uppercase; letter-spacing:.04em; }
+  .field-input { display:block; width:100%; padding:.5rem .75rem; border:1px solid #e2e8f0; border-radius:.5rem; font-size:.875rem; background:#fff; transition:border-color .15s; }
+  select.field-input { cursor:pointer; }
+</style>
+
+<script>
+let uploadedFile = null;
+let pdfBlob = null;
+const apiKeyInput = document.getElementById('api-key');
+
+// Load saved API key
+window.addEventListener('load', () => {
+  const saved = sessionStorage.getItem('mnr_api_key');
+  if (saved) apiKeyInput.value = saved;
+});
+
+// Drop zone
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) setFile(f);
+});
+fileInput.addEventListener('change', e => { if (e.target.files[0]) setFile(e.target.files[0]); });
+
+function setFile(f) {
+  uploadedFile = f;
+  document.getElementById('upload-idle').classList.add('hidden');
+  document.getElementById('upload-preview').classList.remove('hidden');
+  document.getElementById('preview-filename').textContent = f.name;
+  document.getElementById('preview-size').textContent = (f.size / 1024).toFixed(1) + ' KB';
+  if (f.type.startsWith('image/')) {
+    const img = document.getElementById('preview-img');
+    img.src = URL.createObjectURL(f);
+    img.classList.remove('hidden');
+  }
+}
+
+function clearFile() {
+  uploadedFile = null;
+  fileInput.value = '';
+  document.getElementById('upload-idle').classList.remove('hidden');
+  document.getElementById('upload-preview').classList.add('hidden');
+  document.getElementById('preview-img').classList.add('hidden');
+}
+
+async function extractFields() {
+  if (!uploadedFile) { toast('Please select a file first', 'error'); return; }
+  const apiKey = apiKeyInput.value.trim();
+  if (!apiKey) { toast('Please enter your Anthropic API key', 'error'); return; }
+  sessionStorage.setItem('mnr_api_key', apiKey);
+
+  const btn = document.getElementById('extract-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<svg class="w-5 h-5 spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Extracting with Claude Vision...';
+
+  try {
+    const formData = new FormData();
+    formData.append('file', uploadedFile);
+    formData.append('api_key', apiKey);
+
+    const res = await fetch('/mnr-claw/extract', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Extraction failed');
+
+    populateForm(data);
+    showStep(2);
+    toast('Fields extracted successfully!', 'success');
+  } catch(e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.347a3.26 3.26 0 01-4.606 0l-.347-.347z"/></svg> Extract with Claude Vision';
+  }
+}
+
+function populateForm(data) {
+  const form = document.getElementById('fields-form');
+  for (const [key, val] of Object.entries(data)) {
+    if (!val && val !== 0) continue;
+    const el = form.querySelector(`[name="${key}"]`);
+    if (!el) continue;
+    if (el.tagName === 'SELECT') {
+      // Try to match option
+      const opts = [...el.options];
+      const match = opts.find(o => o.value.toLowerCase() === String(val).toLowerCase() || o.text.toLowerCase() === String(val).toLowerCase());
+      if (match) el.value = match.value;
+    } else {
+      el.value = val;
+    }
+  }
+  // Handle physician care compound field
+  if (data.underPhysicianCare) {
+    const sel = form.querySelector('[name="underPhysicianCare"]');
+    const condEl = form.querySelector('[name="physicianCondition"]');
+    if (data.underPhysicianCare.toLowerCase().startsWith('yes')) {
+      if (sel) sel.value = 'Yes';
+      const condMatch = data.underPhysicianCare.match(/yes\s*[-–]\s*(.+)/i);
+      if (condMatch && condEl) condEl.value = condMatch[1].trim();
+    } else {
+      if (sel) sel.value = 'No';
+    }
+  }
+}
+
+async function generatePDF() {
+  const form = document.getElementById('fields-form');
+  const apiKey = apiKeyInput.value.trim() || sessionStorage.getItem('mnr_api_key') || '';
+
+  const fields = {};
+  for (const el of form.elements) {
+    if (el.name && el.value.trim()) fields[el.name] = el.value.trim();
+  }
+
+  const btn = document.getElementById('generate-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<svg class="w-5 h-5 spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Generating PDF...';
+
+  try {
+    const res = await fetch('/mnr-claw/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields, api_key: apiKey })
+    });
+    if (!res.ok) {
+      const d = await res.json();
+      throw new Error(d.error || 'PDF generation failed');
+    }
+    const blob = await res.blob();
+    pdfBlob = blob;
+    const url = URL.createObjectURL(blob);
+
+    const patientName = fields.patientName || 'Patient';
+    const date = new Date().toISOString().split('T')[0];
+    document.getElementById('download-link').href = url;
+    document.getElementById('download-link').download = `MNR_${patientName.replace(/\s+/g,'_')}_${date}.pdf`;
+    document.getElementById('pdf-preview').src = url;
+
+    showStep(3);
+    toast('PDF generated!', 'success');
+  } catch(e) {
+    toast(e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10"/></svg> Generate Filled MNR PDF';
+  }
+}
+
+function showStep(n) {
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById(`step${n}`).classList.add('active');
+  ['prog1','prog2','prog3'].forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (i < n) { el.className = 'px-3 py-1 rounded-full bg-blue-600 text-white font-medium'; }
+    else { el.className = 'px-3 py-1 rounded-full bg-slate-200 text-slate-500 font-medium'; }
+  });
+  window.scrollTo(0,0);
+}
+
+function goBack() { showStep(1); }
+function startOver() { clearFile(); showStep(1); }
+
+function toast(msg, type='info') {
+  const colors = { success:'bg-green-600', error:'bg-red-600', info:'bg-blue-600' };
+  const div = document.createElement('div');
+  div.className = `toast pointer-events-auto px-4 py-3 rounded-lg text-white text-sm font-medium shadow-lg ${colors[type]||colors.info}`;
+  div.textContent = msg;
+  document.getElementById('toast-container').appendChild(div);
+  setTimeout(() => div.remove(), 3200);
+}
+</script>
+</body>
+</html>
