@@ -99,9 +99,23 @@ def fill_mnr_endpoint():
     with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tf:
         output_path = tf.name
 
+    flat_path = output_path + '_flat.pdf'
     try:
         fill_mnr(data, output_path)
-        with open(output_path, 'rb') as f:
+
+        # Ghostscript flatten — removes all interactive form fields so every
+        # PDF viewer (browser, WhatsApp, iOS) renders the filled values correctly.
+        gs_result = subprocess.run([
+            'gs', '-dNOPAUSE', '-dBATCH', '-dQUIET',
+            '-sDEVICE=pdfwrite',
+            '-dPrinted=false',
+            f'-sOutputFile={flat_path}',
+            output_path
+        ], capture_output=True)
+
+        final_path = flat_path if gs_result.returncode == 0 else output_path
+
+        with open(final_path, 'rb') as f:
             pdf_bytes = f.read()
         return send_file(
             io.BytesIO(pdf_bytes),
@@ -112,8 +126,9 @@ def fill_mnr_endpoint():
     except Exception as e:
         return {'error': str(e)}, 500
     finally:
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+        for p in [output_path, flat_path]:
+            if os.path.exists(p):
+                os.unlink(p)
 
 
 if __name__ == '__main__':
